@@ -2,16 +2,12 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/Sorrowful-free/alice-skill/internal/logger"
-	"github.com/Sorrowful-free/alice-skill/internal/models"
 )
 
 func main() {
@@ -28,51 +24,12 @@ func run() error {
 		return err
 	}
 
+	// создаём экземпляр приложения, пока без внешней зависимости хранилища сообщений
+	appInstance := newApp(nil)
+
 	logger.Log.Info("Running server", zap.String("address", flagRunAddr))
-	// оборачиваем хендлер webhook в middleware с логированием
-	return http.ListenAndServe(flagRunAddr, logger.RequestLogger(gzipMiddleware(webhook)))
-}
-
-func webhook(w http.ResponseWriter, r *http.Request) {
-	//...
-
-	text := "Для вас нет новых сообщений."
-
-	// первый запрос новой сессии
-	if req.Session.New {
-		// обрабатываем поле Timezone запроса
-		tz, err := time.LoadLocation(req.Timezone)
-		if err != nil {
-			logger.Log.Debug("cannot parse timezone")
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		// получаем текущее время в часовом поясе пользователя
-		now := time.Now().In(tz)
-		hour, minute, _ := now.Clock()
-
-		// формируем текст ответа
-		text = fmt.Sprintf("Точное время %d часов, %d минут. %s", hour, minute, text)
-	}
-
-	// заполняем модель ответа
-	resp := models.Response{
-		Response: models.ResponsePayload{
-			Text: text, // Алиса проговорит новый текст
-		},
-		Version: "1.0",
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	// сериализуем ответ сервера
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
-		logger.Log.Debug("error encoding response", zap.Error(err))
-		return
-	}
-	logger.Log.Debug("sending HTTP 200 response")
+	// обернём хендлер webhook в middleware с логированием и поддержкой gzip
+	return http.ListenAndServe(flagRunAddr, logger.RequestLogger(gzipMiddleware(appInstance.webhook)))
 }
 
 func gzipMiddleware(h http.HandlerFunc) http.HandlerFunc {
